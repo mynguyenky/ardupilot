@@ -1,47 +1,16 @@
 name: Build MatekH743 25MHz ArduPlane
-
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/build_h743_25mhz.yml'
-
+on: [workflow_dispatch, push]
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. Tai ma nguon ArduPilot kem Submodules
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: 2. Cai dat trinh bien dich chuan cua ArduPilot
-        run: |
-          USER=runner ./Tools/environment_install/install-prereqs-ubuntu.sh -y
-
-      - name: 3. Doi thach anh sang 25MHz va giu rieng ICM-20602
-        run: |
-          sed -i 's/OSCILLATOR_HZ 8000000/OSCILLATOR_HZ 25000000/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef-bl.dat
-          sed -i 's/OSCILLATOR_HZ 8000000/OSCILLATOR_HZ 25000000/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-          sed -i 's/^SPIDEV icm42688/# SPIDEV icm42688/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-          sed -i 's/^SPIDEV mpu6000/# SPIDEV mpu6000/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-          sed -i 's/^SPIDEV icm42605/# SPIDEV icm42605/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-          sed -i 's/^IMU Invensensev3/# IMU Invensensev3/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-          sed -i 's/^IMU Invensense SPI:mpu6000/# IMU Invensense SPI:mpu6000/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
-
-      - name: 4. Bien dich Bootloader 25MHz va ArduPlane
-        run: |
-          export PATH="/opt/gcc-arm-none-eabi-10-2020-q4-major/bin:$HOME/.local/bin:$PATH"
-          python3 ./Tools/scripts/build_bootloaders.py MatekH743
-          ./waf configure --board MatekH743
-          ./waf plane
-
-      - name: 5. Dong goi file .hex va .apj de tai ve
-        uses: actions/upload-artifact@v4
+      - run: USER=runner ./Tools/environment_install/install-prereqs-ubuntu.sh -y
+      - run: sed -i 's/OSCILLATOR_HZ 8000000/OSCILLATOR_HZ 25000000/g' libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef-bl.dat libraries/AP_HAL_ChibiOS/hwdef/MatekH743/hwdef.dat
+      - run: export PATH="/opt/gcc-arm-none-eabi-10-2020-q4-major/bin:$HOME/.local/bin:$PATH" && python3 ./Tools/scripts/build_bootloaders.py MatekH743 && ./waf configure --board MatekH743 && ./waf plane
+      - uses: actions/upload-artifact@v4
         with:
           name: MatekH743_25MHz_ArduPlane_Firmware
-          path: |
-            build/MatekH743/bin/arduplane_with_bl.hex
-            build/MatekH743/bin/arduplane.apj
-            Tools/bootloaders/MatekH743_bl.hex
-            Tools/bootloaders/MatekH743_bl.bin
+          path: build/MatekH743/bin/
