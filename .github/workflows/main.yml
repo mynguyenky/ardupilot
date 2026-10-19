@@ -1,0 +1,93 @@
+name: Build WearcH743 ICM20602 ArduPlane 4.6.3
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-wearc-h743-icm20602.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout official ArduPilot Plane 4.6.3
+        uses: actions/checkout@v4
+        with:
+          repository: ArduPilot/ardupilot
+          ref: Plane-4.6.3
+          submodules: recursive
+
+      - name: Verify source version
+        run: |
+          git log -1 --format='Commit: %H%nSubject: %s'
+          test "$(git describe --tags --exact-match)" = "Plane-4.6.3"
+
+      - name: Install build dependencies
+        run: |
+          USER=runner Tools/environment_install/install-prereqs-ubuntu.sh -y
+
+      - name: Create WearcH743IMU board from MatekH743 definition
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SRC="libraries/AP_HAL_ChibiOS/hwdef/MatekH743"
+          DST="libraries/AP_HAL_ChibiOS/hwdef/WearcH743IMU"
+          test -f "$SRC/hwdef.dat"
+          test -f "$SRC/hwdef-bl.dat"
+          rm -rf "$DST"
+          cp -a "$SRC" "$DST"
+
+          # Use the 25 MHz HSE fitted to the Wearc development kit.
+          sed -i 's/^OSCILLATOR_HZ 8000000$/OSCILLATOR_HZ 25000000/' \
+            "$DST/hwdef.dat" "$DST/hwdef-bl.dat"
+
+          # Keep only ICM20602 as an enabled IMU driver.
+          sed -i \
+            -e '/^[[:space:]]*SPIDEV icm42688[[:space:]]/d' \
+            -e '/^[[:space:]]*SPIDEV mpu6000[[:space:]]/d' \
+            -e '/^[[:space:]]*SPIDEV icm42605[[:space:]]/d' \
+            -e '/^[[:space:]]*IMU Invensensev3 SPI:icm42688[[:space:]]/d' \
+            -e '/^[[:space:]]*IMU Invensensev3 SPI:icm42605[[:space:]]/d' \
+            -e '/^[[:space:]]*IMU Invensense SPI:mpu6000[[:space:]]/d' \
+            "$DST/hwdef.dat"
+
+          # This build does not expect an onboard/external barometer or compass.
+          sed -i \
+            -e '/^[[:space:]]*BARO[[:space:]]/d' \
+            -e '/^[[:space:]]*define AP_COMPASS_PROBING_ENABLED[[:space:]]/d' \
+            "$DST/hwdef.dat"
+
+          echo "=== Clock definitions ==="
+          grep -n '^OSCILLATOR_HZ' "$DST/hwdef.dat" "$DST/hwdef-bl.dat"
+          test "$(grep -c '^OSCILLATOR_HZ 25000000$' "$DST/hwdef.dat")" -eq 1
+          test "$(grep -c '^OSCILLATOR_HZ 25000000$' "$DST/hwdef-bl.dat")" -eq 1
+
+          echo "=== ICM20602 definitions ==="
+          grep -nE 'IMU2_CS|SPI4_[SM]|SPIDEV icm20602|IMU Invensense SPI:icm20602' "$DST/hwdef.dat"
+          grep -q '^PE11 IMU2_CS CS$' "$DST/hwdef.dat"
+          grep -q '^PE12 SPI4_SCK SPI4$' "$DST/hwdef.dat"
+          grep -q '^PE13 SPI4_MISO SPI4$' "$DST/hwdef.dat"
+          grep -q '^PE14 SPI4_MOSI SPI4$' "$DST/hwdef.dat"
+          grep -qE '^SPIDEV[[:space:]]+icm20602[[:space:]]+SPI4[[:space:]]+DEVID1[[:space:]]+IMU2_CS[[:space:]]+MODE3[[:space:]]+1\*MHZ[[:space:]]+4\*MHZ' "$DST/hwdef.dat"
+          grep -q '^IMU Invensense SPI:icm20602 ROTATION_ROLL_180_YAW_270$' "$DST/hwdef.dat"
+
+          echo "=== Confirm no other IMU or barometer drivers are declared ==="
+          ! grep -nE '^[[:space:]]*SPIDEV (icm42688|mpu6000|icm42605)[[:space:]]|^[[:space:]]*IMU .*SPI:(icm42688|mpu6000|icm42605)|^[[:space:]]*BARO[[:space:]]' "$DST/hwdef.dat"
+
+      - name: Build bootloader and ArduPlane
+        run: |
+          set -euxo pipefail
+          export PATH="/opt/gcc-arm-none-eabi-10-2020-q4-major/bin:$HOME/.local/bin:$PATH"
+          python3 ./Tools/scripts/build_bootloaders.py WearcH743IMU
+          ./waf clean
+          ./waf configure --board WearcH743IMU
+          ./waf plane
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WearcH743IMU_25MHz_ArduPlane_4.6.3
+          path: |
+            build/WearcH743IMU/bin/*
+            Tools/bootloaders/WearcH743IMU*
+          if-no-files-found: warn
